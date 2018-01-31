@@ -5,6 +5,7 @@ from PIL import Image
 from os import listdir
 from os.path import join
 from torchvision.transforms import Compose, CenterCrop, ToTensor, Resize
+from io import BytesIO
 
 class DatasetFromHdf5(data.Dataset):
     def __init__(self, file_path):
@@ -40,10 +41,17 @@ def target_transform(crop_size):
         ToTensor(),
     ])
 
+def compress(im, quality=20):
+    # https://stackoverflow.com/questions/31409506/python-convert-from-png-to-jpg-without-saving-file-to-disk-using-pil
+    f = BytesIO()
+    im.save(f, 'JPEG', quality=quality, optimize=True, progressive=True)
+    return Image.open(f)
+
 class DatasetFromFolder(data.Dataset):
-    def __init__(self, image_dir, input_transform=None, target_transform=None):
+    def __init__(self, image_dir, quality=20, input_transform=None, target_transform=None):
         super(DatasetFromFolder, self).__init__()
         self.image_filenames = [join(image_dir,x) for x in listdir(image_dir) if is_image_file(x)]
+        self.quality = quality
 
         self.input_transform = input_transform
         self.target_transform = target_transform
@@ -51,6 +59,9 @@ class DatasetFromFolder(data.Dataset):
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index])
         target = input.copy()
+
+        input = compress(input, self.quality)
+
         if self.input_transform:
             input = self.input_transform(input)
         if self.target_transform:
@@ -78,6 +89,6 @@ def get_test_set(test_dir, upscale_factor):
 
 if __name__ == "__main__":
     image_dir = '/home/hc/PycharmProjects/pytorch-SRResNet/data/img_align_celeba'
-    dataset = DatasetFromFolder(image_dir, input_transform(128,2), target_transform)
+    dataset = DatasetFromFolder(image_dir, 20, input_transform(128,2), target_transform(128))
     input, target = dataset.__getitem__(0)
     print input
