@@ -24,9 +24,10 @@ def is_image_file(filename):
     return any(filename.endswith(extension) for extension in ['.png', '.jpg', 'jpeg'])
 
 def load_img(filepath):
-    img = Image.open(filepath).convert('YCbCr')
-    y,_,_ = img.split()
-    return y
+    # img = Image.open(filepath).convert('YCbCr')
+    # y,_,_ = img.split()
+    img = Image.open(filepath).convert('RGB')
+    return img
 
 def input_transform(crop_size, upscale_factor):
     return Compose([
@@ -75,15 +76,15 @@ class DatasetFromFolder(data.Dataset):
 def calculate_valid_crop_size(crop_size, upscale_factor):
     return crop_size - (crop_size % upscale_factor)
 
-def get_training_set(train_dir, upscale_factor):
-    crop_size = calculate_valid_crop_size(128, upscale_factor)
-    return DatasetFromFolder(train_dir,
+def get_training_set(train_dir, crop_size, upscale_factor, quality):
+    crop_size = calculate_valid_crop_size(crop_size, upscale_factor)
+    return DatasetFromFolder(train_dir, quality,
                              input_transform = input_transform(crop_size, upscale_factor),
                              target_transform = target_transform(crop_size))
 
-def get_test_set(test_dir, upscale_factor):
-    crop_size = calculate_valid_crop_size(128, upscale_factor)
-    return DatasetFromFolder(test_dir,
+def get_test_set(test_dir, crop_size, upscale_factor, quality):
+    crop_size = calculate_valid_crop_size(crop_size, upscale_factor)
+    return DatasetFromFolder(test_dir, quality,
                              input_transform = input_transform(crop_size, upscale_factor),
                              target_transform = target_transform(crop_size))
 
