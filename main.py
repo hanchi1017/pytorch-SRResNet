@@ -48,7 +48,8 @@ def main():
         
     print("===> Loading datasets")
     # train_set = DatasetFromHdf5("/path/to/your/hdf5/data/like/rgb_srresnet_x4.h5")
-    train_set = get_training_set("/home/hc/PycharmProjects/pytorch-SRResNet/data/img_align_celeba", 128, 2, 40)
+    train_dir = "/home/hc/PycharmProjects/pytorch-SRResNet/data/img_align_celeba"
+    train_set = get_training_set(train_dir, crop_size=128, upscale_factor=4, quality=40)
     training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 
     if opt.vgg_loss:
@@ -153,10 +154,10 @@ def train(training_data_loader, optimizer, model, criterion, epoch):
                 print("===> Epoch[{}]({}/{}): Loss: {:.10f}".format(epoch, iteration, len(training_data_loader), loss.data[0]))
     
 def save_checkpoint(model, epoch):
-    model_out_path = "model/" + "model_epoch_{}.pth".format(epoch)
+    model_out_path = "checkpoint/" + "model_epoch_{}.pth".format(epoch)
     state = {"epoch": epoch ,"model": model}
-    if not os.path.exists("model/"):
-        os.makedirs("model/")
+    if not os.path.exists("checkpoint/"):
+        os.makedirs("checkpoint/")
 
     torch.save(state, model_out_path)
         
