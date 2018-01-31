@@ -10,6 +10,7 @@ from srresnet import Net
 from dataset import DatasetFromHdf5
 from torchvision import models
 import torch.utils.model_zoo as model_zoo
+from dataset import get_training_set
 
 # Training settings
 parser = argparse.ArgumentParser(description="PyTorch SRResNet")
@@ -46,7 +47,8 @@ def main():
     cudnn.benchmark = True
         
     print("===> Loading datasets")
-    train_set = DatasetFromHdf5("/path/to/your/hdf5/data/like/rgb_srresnet_x4.h5")
+    # train_set = DatasetFromHdf5("/path/to/your/hdf5/data/like/rgb_srresnet_x4.h5")
+    train_set = get_training_set("/home/hc/PycharmProjects/pytorch-SRResNet/data/img_align_celeba", 128, 2, 40)
     training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 
     if opt.vgg_loss:
