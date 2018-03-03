@@ -117,7 +117,7 @@ def train(training_data_loader, optimizer, model, criterion, epoch):
     for param_group in optimizer.param_groups:
         param_group["lr"] = lr  
 
-    print "epoch =", epoch,"lr =",optimizer.param_groups[0]["lr"]
+    print("epoch =", epoch,"lr =",optimizer.param_groups[0]["lr"])
     model.train()
 
     for iteration, batch in enumerate(training_data_loader, 1):
