@@ -1,3 +1,4 @@
+# coding=utf-8
 import argparse, os
 import torch
 import math, random
@@ -11,6 +12,8 @@ from dataset import DatasetFromHdf5
 from torchvision import models
 import torch.utils.model_zoo as model_zoo
 from dataset import get_training_set
+import torch.nn.functional as F
+from torch.autograd import Variable
 
 # Training settings
 parser = argparse.ArgumentParser(description="PyTorch SRResNet")
@@ -48,7 +51,7 @@ def main():
         
     print("===> Loading datasets")
     # train_set = DatasetFromHdf5("/path/to/your/hdf5/data/like/rgb_srresnet_x4.h5")
-    train_dir = "/home/hc/PycharmProjects/pytorch-SRResNet/data/img_align_celeba"
+    train_dir = "/media/lab/data/hanchi/PycharmProjects/pytorch-SRResNet/data/img_align_celeba"
     train_set = get_training_set(train_dir, crop_size=128, upscale_factor=4, quality=40)
     training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 
@@ -69,14 +72,15 @@ def main():
 
     print("===> Building model")
     model = Net()
-    criterion = nn.MSELoss(size_average=False)
+    # criterion = nn.MSELoss(size_average=False)
+    criterion = CustomLoss(beta=0.5)
 
     print("===> Setting GPU")
     if cuda:
         model = model.cuda()
         criterion = criterion.cuda()
         if opt.vgg_loss:
-            netContent = netContent.cuda() 
+            netContent = netContent.cuda()
 
     # optionally resume from a checkpoint
     if opt.resume:
@@ -129,7 +133,7 @@ def train(training_data_loader, optimizer, model, criterion, epoch):
             target = target.cuda()
         
         output = model(input)
-        loss = criterion(output, target)
+        loss = criterion(input, output, target)
 
         if opt.vgg_loss:
             content_input = netContent(output)
@@ -141,7 +145,7 @@ def train(training_data_loader, optimizer, model, criterion, epoch):
 
         if opt.vgg_loss:
             netContent.zero_grad()
-            content_loss.backward(retain_variables=True)
+            content_loss.backward(retain_variables=True)    # 如果设置vgg_loss，则单独对content_loss进行一次反向传播
         
         loss.backward()
 
@@ -162,6 +166,21 @@ def save_checkpoint(model, epoch):
     torch.save(state, model_out_path)
         
     print("Checkpoint saved to {}".format(model_out_path))
+
+class CustomLoss(nn.Module):
+    def __init__(self, beta):
+        super(CustomLoss, self).__init__()
+        self.beta = beta
+
+    def forward(self, input, output, target):
+        # loss_1 = nn.MSELoss(size_average=False)
+        loss_1 = F.mse_loss(output, target, size_average=False)
+        filter = Variable(torch.cuda.FloatTensor(3,3,1,1).fill_(1), requires_grad=False)
+        # print filter, type(filter)
+        downsample = F.conv2d(target, filter, stride=4)
+        loss_2 = F.mse_loss(downsample, input)
+        loss = loss_1 + self.beta * loss_2
+        return loss
 
 if __name__ == "__main__":
     main()
