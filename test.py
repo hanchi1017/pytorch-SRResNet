@@ -1,10 +1,13 @@
+# coding=utf-8
 import argparse
 import torch
 from torch.autograd import Variable
 import numpy as np
 import time, math
 import scipy.io as sio
+import scipy.misc as smi
 import matplotlib.pyplot as plt
+from dataset import get_test_set
 
 parser = argparse.ArgumentParser(description="PyTorch SRResNet Test")
 parser.add_argument("--cuda", action="store_true", help="use cuda?")
@@ -30,17 +33,25 @@ if cuda and not torch.cuda.is_available():
 
 model = torch.load(opt.model)["model"]
 
-im_gt = sio.loadmat("Set5/" + opt.image + ".mat")['im_gt']
-im_b = sio.loadmat("Set5/" + opt.image + ".mat")['im_b']
-im_l = sio.loadmat("Set5/" + opt.image + ".mat")['im_l']
-           
-im_gt = im_gt.astype(float).astype(np.uint8)
-im_b = im_b.astype(float).astype(np.uint8)
-im_l = im_l.astype(float).astype(np.uint8)      
+# im_gt = sio.loadmat("Set5/" + opt.image + ".mat")['im_gt']    # 类型为float，范围[0,255]
+# im_b = sio.loadmat("Set5/" + opt.image + ".mat")['im_b']
+# im_l = sio.loadmat("Set5/" + opt.image + ".mat")['im_l']
 
-im_input = im_l.astype(np.float32).transpose(2,0,1)
-im_input = im_input.reshape(1,im_input.shape[0],im_input.shape[1],im_input.shape[2])
-im_input = Variable(torch.from_numpy(im_input/255.).float())
+test_dir = 'data/testset'
+hr_size = 128
+testset = get_test_set(test_dir, hr_size, upscale_factor=4, quality=20)
+im_l, im_gt = testset.__getitem__(0)
+
+im_l = im_l.numpy().astype(np.float32)  # 类型float，范围[0,1]
+
+im_b = (im_l*255.).astype(np.uint8)
+im_b = smi.imresize(im_b, (hr_size, hr_size, 3), interp='bicubic')
+
+im_gt = im_gt.numpy().transpose(1,2,0)      # 为了显示需要做一次转置
+im_gt = (im_gt.astype(float)*255.).astype(np.uint8)
+
+im_input = im_l.reshape(1,im_l.shape[0],im_l.shape[1],im_l.shape[2])
+im_input = Variable(torch.from_numpy(im_input).float())    #
 
 if cuda:
     model = model.cuda()
@@ -59,10 +70,14 @@ im_h = out.data[0].numpy().astype(np.float32)
 im_h = im_h*255.
 im_h[im_h<0] = 0
 im_h[im_h>255.] = 255.            
-im_h = im_h.transpose(1,2,0)
+im_h = im_h.transpose(1,2,0).astype(np.uint8)
+# print('im_h', im_h)
+psnr_bicubic = PSNR(im_b, im_gt)
+psnr_output = PSNR(im_h, im_gt)
 
 print("Scale=",opt.scale)
 print("It takes {}s for processing".format(elapsed_time))
+print("bicubic psnr : {} ; net output psnr : {}".format(psnr_bicubic, psnr_output))
 
 fig = plt.figure()
 ax = plt.subplot("131")
@@ -74,6 +89,6 @@ ax.imshow(im_b)
 ax.set_title("Input(Bicubic)")
 
 ax = plt.subplot("133")
-ax.imshow(im_h.astype(np.uint8))
+ax.imshow(im_h)
 ax.set_title("Output(SRResNet)")
 plt.show()
