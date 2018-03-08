@@ -92,4 +92,4 @@ if __name__ == "__main__":
     image_dir = '/home/hc/PycharmProjects/pytorch-SRResNet/data/img_align_celeba'
     dataset = DatasetFromFolder(image_dir, 20, input_transform(128,2), target_transform(128))
     input, target = dataset.__getitem__(0)
-    print input
+    print(input)
