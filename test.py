@@ -8,6 +8,7 @@ import scipy.io as sio
 import scipy.misc as smi
 import matplotlib.pyplot as plt
 from dataset import get_test_set
+from PIL import Image
 
 parser = argparse.ArgumentParser(description="PyTorch SRResNet Test")
 parser.add_argument("--cuda", action="store_true", help="use cuda?")
@@ -37,9 +38,10 @@ model = torch.load(opt.model)["model"]
 # im_b = sio.loadmat("Set5/" + opt.image + ".mat")['im_b']
 # im_l = sio.loadmat("Set5/" + opt.image + ".mat")['im_l']
 
-test_dir = 'data/testset'
+test_dir = 'data/testset'   # 包含原始gt的image
+# test_dir = 'data/other_method/img_gt'
 hr_size = 128
-testset = get_test_set(test_dir, hr_size, upscale_factor=4, quality=20)
+testset = get_test_set(test_dir, hr_size, upscale_factor=4, quality=40)
 im_l, im_gt = testset.__getitem__(0)
 
 im_l = im_l.numpy().astype(np.float32)  # 类型float，范围[0,1]
@@ -51,7 +53,7 @@ im_gt = im_gt.numpy().transpose(1,2,0)      # 为了显示需要做一次转置
 im_gt = (im_gt.astype(float)*255.).astype(np.uint8)
 
 im_input = im_l.reshape(1,im_l.shape[0],im_l.shape[1],im_l.shape[2])
-im_input = Variable(torch.from_numpy(im_input).float())    #
+im_input = Variable(torch.from_numpy(im_input).float())
 
 if cuda:
     model = model.cuda()
@@ -71,9 +73,15 @@ im_h = im_h*255.
 im_h[im_h<0] = 0
 im_h[im_h>255.] = 255.            
 im_h = im_h.transpose(1,2,0).astype(np.uint8)
-# print('im_h', im_h)
-psnr_bicubic = PSNR(im_b, im_gt)
-psnr_output = PSNR(im_h, im_gt)
+
+# 转换为灰度图，计算PSNR（即只计算Y分量）
+# im_gt_grey = Image.fromarray(im_gt)
+im_gt_grey = np.array(smi.toimage(im_gt).convert('L'))  # 函数toimage 将numpy array转为PIL.Image.Image, 或者使用Image.fromarray
+im_b_grey = np.array(smi.toimage(im_b).convert('L'))
+im_h_grey = np.array(smi.toimage(im_h).convert('L'))
+
+psnr_bicubic = PSNR(im_b_grey, im_gt_grey)
+psnr_output = PSNR(im_h_grey, im_gt_grey)
 
 print("Scale=",opt.scale)
 print("It takes {}s for processing".format(elapsed_time))
@@ -90,5 +98,5 @@ ax.set_title("Input(Bicubic)")
 
 ax = plt.subplot("133")
 ax.imshow(im_h)
-ax.set_title("Output(SRResNet)")
+ax.set_title("Output(Net)")
 plt.show()
