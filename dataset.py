@@ -32,7 +32,7 @@ def load_img(filepath):
 def input_transform(crop_size, upscale_factor):
     return Compose([
         CenterCrop(crop_size),
-        Resize(crop_size // upscale_factor),
+        Resize((crop_size[0] // upscale_factor, crop_size[1] // upscale_factor)),   #https://stackoverflow.com/questions/48446898/unknown-resampling-filter-error-when-trying-to-create-my-own-dataset-with-pytorc
         ToTensor(),
     ])
 
@@ -83,7 +83,7 @@ def get_training_set(train_dir, crop_size, upscale_factor, quality):
                              target_transform = target_transform(crop_size))
 
 def get_test_set(test_dir, crop_size, upscale_factor, quality):
-    crop_size = calculate_valid_crop_size(crop_size, upscale_factor)
+    # crop_size = calculate_valid_crop_size(crop_size, upscale_factor)
     return DatasetFromFolder(test_dir, quality,
                              input_transform = input_transform(crop_size, upscale_factor),
                              target_transform = target_transform(crop_size))
