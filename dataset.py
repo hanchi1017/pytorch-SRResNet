@@ -1,11 +1,13 @@
+# coding=utf-8
 import torch.utils.data as data
 import torch
 import h5py
 from PIL import Image
 from os import listdir
 from os.path import join
-from torchvision.transforms import Compose, CenterCrop, ToTensor, Resize
+from torchvision.transforms import Compose, CenterCrop, ToTensor, Resize, ToPILImage
 from io import BytesIO
+import numpy as np
 
 class DatasetFromHdf5(data.Dataset):
     def __init__(self, file_path):
@@ -33,7 +35,7 @@ def input_transform(crop_size, upscale_factor):
     return Compose([
         CenterCrop(crop_size),
         Resize((crop_size[0] // upscale_factor, crop_size[1] // upscale_factor)),   #https://stackoverflow.com/questions/48446898/unknown-resampling-filter-error-when-trying-to-create-my-own-dataset-with-pytorc
-        ToTensor(),
+        # ToTensor(),   # 不使用ToTensor，transform后仍然返回PIL.Image对象
     ])
 
 def target_transform(crop_size):
@@ -61,10 +63,10 @@ class DatasetFromFolder(data.Dataset):
         input = load_img(self.image_filenames[index])
         target = input.copy()
 
-        input = compress(input, self.quality)
-
         if self.input_transform:
-            input = self.input_transform(input)
+            input = self.input_transform(input)     # 经过transforms.ToTensor后，图像scale从[0,255]转为[0,1]
+            input = compress(input, self.quality)
+            input = ToTensor()(input)
         if self.target_transform:
             target = self.target_transform(target)
 
@@ -77,7 +79,7 @@ def calculate_valid_crop_size(crop_size, upscale_factor):
     return crop_size - (crop_size % upscale_factor)
 
 def get_training_set(train_dir, crop_size, upscale_factor, quality):
-    crop_size = calculate_valid_crop_size(crop_size, upscale_factor)
+    # crop_size = calculate_valid_crop_size(crop_size, upscale_factor)
     return DatasetFromFolder(train_dir, quality,
                              input_transform = input_transform(crop_size, upscale_factor),
                              target_transform = target_transform(crop_size))
@@ -89,7 +91,7 @@ def get_test_set(test_dir, crop_size, upscale_factor, quality):
                              target_transform = target_transform(crop_size))
 
 if __name__ == "__main__":
-    image_dir = '/home/hc/PycharmProjects/pytorch-SRResNet/data/img_align_celeba'
-    dataset = DatasetFromFolder(image_dir, 20, input_transform(128,2), target_transform(128))
+    image_dir = '/media/lab/data/hanchi/PycharmProjects/pytorch-SRResNet/result/img_gt'
+    dataset = DatasetFromFolder(image_dir, 20, input_transform((128,128),2), target_transform(128))
     input, target = dataset.__getitem__(0)
     print(input)
