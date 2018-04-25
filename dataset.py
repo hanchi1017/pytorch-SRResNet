@@ -8,6 +8,8 @@ from os.path import join
 from torchvision.transforms import Compose, CenterCrop, ToTensor, Resize, ToPILImage
 from io import BytesIO
 import numpy as np
+import cv2
+from utils import get_mask
 
 class DatasetFromHdf5(data.Dataset):
     def __init__(self, file_path):
@@ -35,13 +37,13 @@ def input_transform(crop_size, upscale_factor):
     return Compose([
         CenterCrop(crop_size),
         Resize((crop_size[0] // upscale_factor, crop_size[1] // upscale_factor)),   #https://stackoverflow.com/questions/48446898/unknown-resampling-filter-error-when-trying-to-create-my-own-dataset-with-pytorc
-        # ToTensor(),   # 不使用ToTensor，transform后仍然返回PIL.Image对象
+        ToTensor(),   # 不使用ToTensor，transform后仍然返回PIL.Image对象
     ])
 
 def target_transform(crop_size):
     return Compose([
         CenterCrop(crop_size),
-        ToTensor(),
+        # ToTensor(),
     ])
 
 def compress(im, quality=20):
@@ -62,15 +64,21 @@ class DatasetFromFolder(data.Dataset):
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index])
         target = input.copy()
-
+        input = compress(input, self.quality)
         if self.input_transform:
             input = self.input_transform(input)     # 经过transforms.ToTensor后，图像scale从[0,255]转为[0,1]
-            input = compress(input, self.quality)
-            input = ToTensor()(input)
+            # input = compress(input, self.quality)
+            # input = ToTensor()(input)
         if self.target_transform:
             target = self.target_transform(target)
-
-        return input, target
+            # print 'type ', type(target)
+            mask = get_mask(target)
+            mask = mask[np.newaxis, :]
+            target = ToTensor()(target)
+            # print 'type ', type(target)
+            # cv2.imshow('cropped',np.array(target)[0,:,:])
+            # cv2.waitKey(0)
+            return input, target, mask
 
     def __len__(self):
         return len(self.image_filenames)
@@ -93,5 +101,5 @@ def get_test_set(test_dir, crop_size, upscale_factor, quality):
 if __name__ == "__main__":
     image_dir = '/media/lab/data/hanchi/PycharmProjects/pytorch-SRResNet/result/img_gt'
     dataset = DatasetFromFolder(image_dir, 20, input_transform((128,128),2), target_transform(128))
-    input, target = dataset.__getitem__(0)
-    print(input)
+    input, target, mask = dataset.__getitem__(0)
+    # print(input)
