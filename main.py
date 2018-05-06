@@ -1,4 +1,5 @@
 # coding=utf-8
+from __future__ import print_function
 import argparse, os
 import torch
 import math, random
@@ -14,6 +15,7 @@ import torch.utils.model_zoo as model_zoo
 from dataset import get_training_set
 import torch.nn.functional as F
 from torch.autograd import Variable
+import dlib,time
 
 # Training settings
 parser = argparse.ArgumentParser(description="PyTorch SRResNet")
@@ -52,7 +54,9 @@ def main():
     print("===> Loading datasets")
     # train_set = DatasetFromHdf5("/path/to/your/hdf5/data/like/rgb_srresnet_x4.h5")
     train_dir = "/media/lab/data/hanchi/PycharmProjects/pytorch-SRResNet/data/img_align_celeba"
-    train_set = get_training_set(train_dir, crop_size=128, upscale_factor=4, quality=40)
+    face_detector = dlib.get_frontal_face_detector()
+    landmark_predictor = dlib.shape_predictor('/media/lab/data/hanchi/dlib/shape_predictor_68_face_landmarks.dat')
+    train_set = get_training_set(train_dir, face_detector, landmark_predictor, crop_size=(128,128), upscale_factor=4, quality=40)
     training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 
     if opt.vgg_loss:
@@ -87,13 +91,13 @@ def main():
         if os.path.isfile(opt.resume):
             print("=> loading checkpoint '{}'".format(opt.resume))
             checkpoint = torch.load(opt.resume)
-            opt.start_epoch = checkpoint["epoch"] + 1
+            opt.start_epoch = checkpoint["epoch"] + 1   # opt.start_epoch 按照checkpoint文件计算
             model.load_state_dict(checkpoint["model"].state_dict())
         else:
             print("=> no checkpoint found at '{}'".format(opt.resume))
             
     # optionally copy weights from a checkpoint
-    if opt.pretrained:
+    if opt.pretrained:      # opt.start_epoch = 1
         if os.path.isfile(opt.pretrained):
             print("=> loading model '{}'".format(opt.pretrained))
             weights = torch.load(opt.pretrained)
@@ -109,31 +113,32 @@ def main():
         train(training_data_loader, optimizer, model, criterion, epoch)
         save_checkpoint(model, epoch)
     
-def adjust_learning_rate(optimizer, epoch):
+def adjust_learning_rate(epoch):
     """Sets the learning rate to the initial LR decayed by 10"""
-    lr = opt.lr * (0.1 ** (epoch // opt.step))
+    lr = opt.lr * (0.1 ** (epoch // opt.step))  # 设置学习率衰减规则，每opt.step个epoch 学习率减小10倍
     return lr    
 
 def train(training_data_loader, optimizer, model, criterion, epoch):
 
-    lr = adjust_learning_rate(optimizer, epoch-1)
+    lr = adjust_learning_rate(epoch-600-1)
     
     for param_group in optimizer.param_groups:
-        param_group["lr"] = lr  
+        param_group["lr"] = lr
 
     print("epoch =", epoch,"lr =",optimizer.param_groups[0]["lr"])
     model.train()
 
     for iteration, batch in enumerate(training_data_loader, 1):
-
-        input, target = Variable(batch[0]), Variable(batch[1], requires_grad=False)
+        start_time = time.time()
+        input, target, mask = Variable(batch[0]), Variable(batch[1], requires_grad=False), Variable(batch[2], requires_grad=False)
 
         if opt.cuda:
             input = input.cuda()
             target = target.cuda()
-        
+            mask = mask.cuda()
+
         output = model(input)
-        loss = criterion(input, output, target)
+        loss = criterion(input, output, target, mask)
 
         if opt.vgg_loss:
             content_input = netContent(output)
@@ -150,18 +155,19 @@ def train(training_data_loader, optimizer, model, criterion, epoch):
         loss.backward()
 
         optimizer.step()
-        
+        elapsed_time = time.time() - start_time
         if iteration%100 == 0:
+
             if opt.vgg_loss:
                 print("===> Epoch[{}]({}/{}): Loss: {:.10f} Content_loss {:.10f}".format(epoch, iteration, len(training_data_loader), loss.data[0], content_loss.data[0]))
             else:
-                print("===> Epoch[{}]({}/{}): Loss: {:.10f}".format(epoch, iteration, len(training_data_loader), loss.data[0]))
+                print("===> Epoch[{}]({}/{}): Loss: {:.10f} time: {}".format(epoch, iteration, len(training_data_loader), loss.data[0], elapsed_time))
     
 def save_checkpoint(model, epoch):
-    model_out_path = "checkpoint/" + "model_epoch_{}.pth".format(epoch)
+    model_out_path = "checkpoint_mask/base500_" + "model_epoch_{}.pth".format(epoch)
     state = {"epoch": epoch ,"model": model}
-    if not os.path.exists("checkpoint/"):
-        os.makedirs("checkpoint/")
+    if not os.path.exists("checkpoint_mask/"):
+        os.makedirs("checkpoint_mask/")
 
     torch.save(state, model_out_path)
         
@@ -172,8 +178,10 @@ class CustomLoss(nn.Module):
         super(CustomLoss, self).__init__()
         self.beta = beta
 
-    def forward(self, input, output, target):
+    def forward(self, input, output, target, mask):
         # loss_1 = nn.MSELoss(size_average=False)
+        output = mask * output
+        target = mask * target
         loss_1 = F.mse_loss(output, target, size_average=False)
         filter = Variable(torch.cuda.FloatTensor(3,3,1,1).fill_(1), requires_grad=False)
         # print filter, type(filter)
