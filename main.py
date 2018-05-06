@@ -185,7 +185,8 @@ class CustomLoss(nn.Module):
         loss_1 = F.mse_loss(output, target, size_average=False)
         filter = Variable(torch.cuda.FloatTensor(3,3,1,1).fill_(1), requires_grad=False)
         # print filter, type(filter)
-        downsample = F.conv2d(target, filter, stride=4)
+        # downsample = F.conv2d(target, filter, stride=4)
+        downsample = F.max_pool2d(target, 4, 4)
         loss_2 = F.mse_loss(downsample, input)
         loss = loss_1 + self.beta * loss_2
         return loss
