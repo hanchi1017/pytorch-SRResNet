@@ -16,9 +16,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import dlib,time
 from tensorboardX import SummaryWriter
-import numpy as np
-import scipy.misc as smi
-from utils import PSNR
+import csv
 
 # Training settings
 parser = argparse.ArgumentParser(description="PyTorch SRResNet")
@@ -35,17 +33,29 @@ parser.add_argument("--momentum", default=0.9, type=float, help="Momentum, Defau
 parser.add_argument("--weight-decay", "--wd", default=0, type=float, help="weight decay, Default: 0")
 parser.add_argument("--pretrained", default="", type=str, help="path to pretrained model (default: none)")
 parser.add_argument("--vgg_loss", action="store_true", help="Use content loss?")
-writer = SummaryWriter()
+
 opt = parser.parse_args()
+print(opt)
+
+train_dir = "data/train"
+test_dir = "data/test"
+crop_size = (128, 128)
+cpt_dir = "model/checkpoint_vgg_relu22"
+beta = 1
+
+if not os.path.exists(cpt_dir):
+    os.makedirs(cpt_dir)
+resultFile = open("{}/result.csv".format(cpt_dir), 'a')
+fieldnames = ['Epoch', 'Iteration', 'AvgPSNR', 'AvgCustomLoss']
+resultWriter = csv.DictWriter(resultFile, fieldnames=fieldnames)
+resultWriter.writeheader()
+writer = SummaryWriter()
 
 def main():
-    # train_dir = "data/img_align_celeba"
-    train_dir = "data/testset"
-    crop_size = (128, 128)
-    cpt_dir = "model/checkpoint_avrpool2"
+
 
     global opt, model, netContent
-    print(opt)
+
 
     cuda = opt.cuda
     if cuda and not torch.cuda.is_available():
@@ -62,7 +72,9 @@ def main():
     print("===> Loading datasets")
     # train_set = DatasetFromHdf5("/path/to/your/hdf5/data/like/rgb_srresnet_x4.h5")
     train_set = get_training_set(train_dir, crop_size, upscale_factor=4, quality=40)
+    test_set = get_training_set(test_dir, crop_size, upscale_factor=4, quality=40)
     training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
+    test_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=True)
 
     if opt.vgg_loss:
         print('===> Loading VGG model')
@@ -71,7 +83,7 @@ def main():
         class _content_model(nn.Module):
             def __init__(self):
                 super(_content_model, self).__init__()
-                self.feature = nn.Sequential(*list(netVGG.features.children())[:-1])
+                self.feature = nn.Sequential(*list(netVGG.features.children())[:4])    # 使用relu2_2
                 
             def forward(self, x):
                 out = self.feature(x)
@@ -81,8 +93,9 @@ def main():
 
     print("===> Building model")
     model = Net()
-    # criterion = nn.MSELoss(size_average=False)
-    criterion = CustomLoss(beta=0.5)
+
+    mseLoss = nn.MSELoss(size_average=False)
+    criterion = CustomLoss(beta)
 
     print("===> Setting GPU")
     if cuda:
@@ -90,6 +103,7 @@ def main():
         criterion = criterion.cuda()
         if opt.vgg_loss:
             netContent = netContent.cuda()
+            mseLoss.cuda()
 
     # optionally resume from a checkpoint
     if opt.resume:
@@ -115,18 +129,22 @@ def main():
     scheduler = StepLR(optimizer, step_size=opt.step, gamma=0.1, last_epoch=-1)
     print("===> Training")
 
+
+
     for epoch in range(opt.start_epoch, opt.nEpochs + 1):
         scheduler.step()
-        train(training_data_loader, optimizer, model, criterion, epoch)
+        train(training_data_loader, test_data_loader, optimizer, model, criterion, mseLoss, epoch, opt.seed, cpt_dir)
         save_checkpoint(model, epoch, optimizer.param_groups[0]['lr'], cpt_dir)
-        evaluate(model, opt.seed, "data/testset", crop_size, epoch=epoch, cpt_dir=cpt_dir)
+
+    writer.close()
+    resultFile.close()
 
 def adjust_learning_rate(epoch):
     """Sets the learning rate to the initial LR decayed by 10"""
     lr = opt.lr * (0.1 ** (epoch // opt.step))  # 设置学习率衰减规则，每opt.step个epoch 学习率减小10倍
     return lr    
 
-def train(training_data_loader, optimizer, model, criterion, epoch):
+def train(training_data_loader, test_data_loader, optimizer, model, criterion, mseLoss, epoch, seed, cpt_dir):
 
     # lr = adjust_learning_rate(epoch-500-1)
     #
@@ -153,7 +171,7 @@ def train(training_data_loader, optimizer, model, criterion, epoch):
             content_input = netContent(output)
             content_target = netContent(target)
             content_target = content_target.detach()
-            content_loss = criterion(content_input, content_target)
+            content_loss = mseLoss(content_input, content_target)
         
         optimizer.zero_grad()
 
@@ -171,7 +189,8 @@ def train(training_data_loader, optimizer, model, criterion, epoch):
                 print("===> Epoch[{}]({}/{}): Loss: {:.10f} Content_loss {:.10f}".format(epoch, iteration, len(training_data_loader), loss.data[0], content_loss.data[0]))
             else:
                 print("===> Epoch[{}]({}/{}): Loss: {:.10f} time: {}".format(epoch, iteration, len(training_data_loader), loss.data[0], elapsed_time))
-            writer.add_scalar('Loss', loss.data[0], iteration)
+            evaluate(test_data_loader, model, criterion, opt.seed, epoch, (epoch-opt.start_epoch)*len(training_data_loader)+iteration)
+
 
 def save_checkpoint(model, epoch, lr, cpt_dir):
     model_out_path = "{}/base500_model_epoch_{}_lr_{}.pth".format(cpt_dir, epoch, lr)
@@ -183,44 +202,34 @@ def save_checkpoint(model, epoch, lr, cpt_dir):
         
     print("Checkpoint saved to {}".format(model_out_path))
 
-def evaluate(model, seed, eval_path, crop_size, epoch, cpt_dir):
-    testset = get_test_set(eval_path, crop_size, upscale_factor=4, quality=40)
-    psnrs = []
-    if opt.cuda:
-        model = model.cuda()
-    else:
-        model = model.cpu()
+def evaluate(test_data_loader, model, criterion, seed, epoch, iteration):
 
-    for i in range(0, testset.__len__()):
-        im_l, im_gt, _, _ = testset.__getitem__(i)
-        im_l = im_l.numpy().astype(np.float32)
-
-        im_input = im_l.reshape(1, im_l.shape[0], im_l.shape[1], im_l.shape[2])
-        im_input = Variable(torch.from_numpy(im_input).float())
+    avg_psnr = 0
+    avg_loss = 0
+    for iterarion, batch in enumerate(test_data_loader, 1):
+        input, target, lr_mask, hr_mask = Variable(batch[0]), Variable(batch[1], requires_grad=False), Variable(batch[2], requires_grad=False), Variable(batch[3], requires_grad=False)
+        MSELoss = nn.MSELoss()
         if opt.cuda:
-            im_input = im_input.cuda()
+            input = input.cuda()
+            target = target.cuda()
+            lr_mask = lr_mask.cuda()
+            hr_mask = hr_mask.cuda()
+            MSELoss = MSELoss.cuda()
 
-        out = model(im_input)
-        out = out.cpu()
-        im_h = out.data[0].numpy().astype(np.float32)
-        im_h = im_h*255.
-        im_h[im_h<0] = 0
-        im_h[im_h>255.] = 255.
-        im_h = im_h.transpose(1,2,0).astype(np.uint8)
-        im_hr_grey = np.array(smi.toimage(im_h).convert('L'))
+        output = model(input)
+        loss = criterion(input, output, target, lr_mask, hr_mask)
+        avg_loss += loss.data[0]
 
-        im_gt = im_gt.numpy().transpose(1, 2, 0)
-        im_gt = (im_gt.astype(float) * 255.).astype(np.uint8)
-        im_gt_grey = np.array(smi.toimage(im_gt).convert('L'))
+        mse = MSELoss(output, target)
+        psnr = 10 * math.log10(1 / mse.data[0])
+        avg_psnr += psnr
 
-        psnr_output = PSNR(im_hr_grey, im_gt_grey)
-        psnrs.append(psnr_output)
-    psnr_mean = np.array(psnrs).mean()
-    writer.add_scalar("seed_{}/psnr_mean".format(seed),psnr_mean,epoch)
+    writer.add_scalar("seed_{}/CustomLoss_mean".format(seed), avg_loss, epoch)
+    writer.add_scalar("seed_{}/psnr_mean".format(seed), avg_psnr, epoch)
+    resultWriter.writerow({'Epoch':epoch, 'Iteration':iteration, 'AvgPSNR':avg_psnr, 'AvgCustomLoss':avg_loss})
 
-    with open("{}/mean_psnr.txt".format(cpt_dir), 'a') as f:
-        f.write('epoch{}: mean psnr on eval set: {}\n'.format(epoch,psnr_mean))
-    print("seed {} : mean psnr on eval set: {}".format(seed, psnr_mean))
+    if iteration%1000 == 0:
+        print("seed {}: ===> Epoch: {}; Iteration: {}; Avg. CustomLoss: {:.4f}; Avg. PSNR: {:.4f} dB".format(seed,epoch,iteration,avg_loss / len(test_data_loader), avg_psnr / len(test_data_loader)))   # len(test_data_loader) 为batch总数
 
 class CustomLoss(nn.Module):
     def __init__(self, beta):
