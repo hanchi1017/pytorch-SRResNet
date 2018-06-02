@@ -9,10 +9,12 @@ import scipy.misc as smi
 import matplotlib.pyplot as plt
 from dataset import get_test_set
 from PIL import Image
-from os.path import join, isdir, isfile
+from os.path import join, isdir, isfile, exists
 from os import listdir, remove
 from utils import PSNR, delete_all
 import cv2,dlib
+from torch.utils.data import DataLoader
+import os
 
 parser = argparse.ArgumentParser(description="PyTorch SRResNet Test")
 parser.add_argument("--cuda", action="store_true", help="use cuda?")
@@ -28,34 +30,41 @@ if cuda and not torch.cuda.is_available():
 
 model = torch.load(opt.model)["model"]
 epoch = torch.load(opt.model)["epoch"]
-# im_gt = sio.loadmat("Set5/" + opt.image + ".mat")['im_gt']    # 类型为float，范围[0,255]
-# im_b = sio.loadmat("Set5/" + opt.image + ".mat")['im_b']
-# im_l = sio.loadmat("Set5/" + opt.image + ".mat")['im_l']
+if cuda:
+    model = model.cuda()
+else:
+    model = model.cpu()
 
-test_dir = 'data/testset'   # 包含原始gt的image
+test_dir = 'data/gt'   # 包含原始gt的image
 hr_size = (120, 100)
 # test_dir = 'data/other_method/img_gt'
 # hr_size = (320,240)     # (height, width)
+root_dir = 'result/result_1'
+if not exists(root_dir):
+    os.mkdir(root_dir)
+else:
+    raise Exception("result already exits")
 
-gt_dir = 'result/img_gt'
-lr_dir = 'result/img_lr'
-hr_dir = 'result/img_hr_{}'.format(epoch)
-bi_dir = 'result/img_bi'
-gt_dir_grey = 'result/img_gt_grey'
-lr_dir_grey = 'result/img_lr_grey'
-hr_dir_grey = 'result/img_hr_grey'
-bi_dir_grey = 'result/img_bi_grey'
-list_txt = '{}/result_epoch_{}.txt'.format(hr_dir,epoch)
+gt_dir = join(root_dir,'img_gt')
+lr_dir = join(root_dir,'img_lr')
+hr_dir = join(root_dir,'img_hr_{}'.format(epoch))
+bi_dir = join(root_dir,'img_bi')
+gt_dir_grey = join(root_dir,'img_gt_grey')
+lr_dir_grey = join(root_dir,'img_lr_grey')
+hr_dir_grey = join(root_dir,'img_hr_grey')
+bi_dir_grey = join(root_dir,'img_bi_grey')
+list_txt = join(hr_dir,'result_epoch_{}.txt'.format(epoch))
 
 path_list = [gt_dir, lr_dir, hr_dir, bi_dir, gt_dir_grey, lr_dir_grey, hr_dir_grey, bi_dir_grey, list_txt]
 delete_all(path_list)
 
-face_detector = dlib.get_frontal_face_detector()
-landmark_predictor = dlib.shape_predictor('/media/lab/data/hanchi/dlib/shape_predictor_68_face_landmarks.dat')
-testset = get_test_set(test_dir, face_detector, landmark_predictor, hr_size, upscale_factor=4, quality=40)     # 得到测试集图像
-for i in range(0, testset.__len__()):
+testset = get_test_set(test_dir, hr_size, upscale_factor=4, quality=40)     # 得到测试集图像
+test_data_loader = DataLoader(dataset=testset, batch_size=32)
 
-    im_l, im_gt, mask = testset.__getitem__(i)
+
+for i in range(0, testset.__len__()):
+# for iteration, batch in enumerate(test_data_loader, 1):
+    im_l, im_gt, prefix,  _, _ = testset.__getitem__(i)
 
     im_l = im_l.numpy().astype(np.float32)  # 类型float，范围[0,1]
     im_lr_norm = (im_l*255.).astype(np.uint8).transpose(1,2,0)
@@ -66,12 +75,8 @@ for i in range(0, testset.__len__()):
 
     im_input = im_l.reshape(1,im_l.shape[0],im_l.shape[1],im_l.shape[2])
     im_input = Variable(torch.from_numpy(im_input).float())
-
     if cuda:
-        model = model.cuda()
         im_input = im_input.cuda()
-    else:
-        model = model.cpu()
 
     start_time = time.time()
     out = model(im_input)
@@ -86,10 +91,10 @@ for i in range(0, testset.__len__()):
     im_h = im_h.transpose(1,2,0).astype(np.uint8)
 
     # 保存图像到各自目录
-    smi.imsave(join(gt_dir, '{}.png'.format(i)), im_gt)
-    smi.imsave(join(hr_dir, '{}.png'.format(i)), im_h)
-    smi.imsave(join(bi_dir, '{}.png'.format(i)), im_b)
-    smi.imsave(join(lr_dir, '{}.png'.format(i)), im_lr_norm)  # LR image id saved here
+    smi.imsave(join(gt_dir, '{}.png'.format(prefix)), im_gt)
+    smi.imsave(join(hr_dir, '{}.png'.format(prefix)), im_h)
+    smi.imsave(join(bi_dir, '{}.png'.format(prefix)), im_b)
+    smi.imsave(join(lr_dir, '{}.png'.format(prefix)), im_lr_norm)  # LR image id saved here
 
     # 转换为灰度图，计算PSNR（即只计算Y分量）
     # im_gt_grey = Image.fromarray(im_gt)
@@ -97,10 +102,10 @@ for i in range(0, testset.__len__()):
     im_bi_grey = np.array(smi.toimage(im_b).convert('L'))
     im_hr_grey = np.array(smi.toimage(im_h).convert('L'))
     im_lr_grey = np.array(smi.toimage(im_lr_norm).convert('L'))
-    smi.imsave(join(gt_dir_grey, '{}.png'.format(i)), im_gt_grey)
-    smi.imsave(join(bi_dir_grey, '{}.png'.format(i)), im_bi_grey)
-    smi.imsave(join(hr_dir_grey, '{}.png'.format(i)), im_hr_grey)
-    smi.imsave(join(lr_dir_grey, '{}.png'.format(i)), im_lr_grey)
+    smi.imsave(join(gt_dir_grey, '{}.png'.format(prefix)), im_gt_grey)
+    smi.imsave(join(bi_dir_grey, '{}.png'.format(prefix)), im_bi_grey)
+    smi.imsave(join(hr_dir_grey, '{}.png'.format(prefix)), im_hr_grey)
+    smi.imsave(join(lr_dir_grey, '{}.png'.format(prefix)), im_lr_grey)
     print('images are saved')
 
     psnr_bicubic = PSNR(im_bi_grey, im_gt_grey)
@@ -112,19 +117,19 @@ for i in range(0, testset.__len__()):
 
     with open(list_txt,'a') as f:
         f.write('{} {}.png bicubic psnr: {} ; ours psnr: {}\n'.format(i,i,psnr_bicubic,psnr_output))
-
-    fig = plt.figure()
-    ax = plt.subplot("131")
-    ax.imshow(im_gt)
-    ax.set_title("GT")
-
-    ax = plt.subplot("132")
-    ax.imshow(im_b)
-    ax.set_title("Output(Bicubic)\nPSNR={}".format(psnr_bicubic))
-
-    ax = plt.subplot("133")
-    ax.imshow(im_h)
-    ax.set_title("Output(Net)\nPSNR={}".format(psnr_output))
+    #
+    # fig = plt.figure()
+    # ax = plt.subplot("131")
+    # ax.imshow(im_gt)
+    # ax.set_title("GT")
+    #
+    # ax = plt.subplot("132")
+    # ax.imshow(im_b)
+    # ax.set_title("Output(Bicubic)\nPSNR={}".format(psnr_bicubic))
+    #
+    # ax = plt.subplot("133")
+    # ax.imshow(im_h)
+    # ax.set_title("Output(Net)\nPSNR={}".format(psnr_output))
 
     # ax = plt.subplot("144")
     # ret, thresh = cv2.threshold(mask, 0.5, 255, cv2.THRESH_BINARY_INV)
